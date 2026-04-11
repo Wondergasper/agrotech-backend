@@ -1,0 +1,202 @@
+import json
+import uuid
+import mimetypes
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from sqlmodel import Session, select
+from app.database import get_session
+from app.models import Product, User
+from app.schemas import ProductCreate, ProductUpdate, ProductPublic
+from app.deps import get_current_user, require_vendor
+from app.storage import supabase, SUPABASE_BUCKET, get_public_url
+
+router = APIRouter(prefix="/api/products", tags=["Products"])
+
+
+def _to_public(p: Product) -> ProductPublic:
+    return ProductPublic(
+        id=p.id,
+        name=p.name,
+        description=p.description,
+        price=p.price,
+        unit=p.unit,
+        category=p.category,
+        tags=p.get_tags(),
+        freshness=p.freshness,
+        image_url=p.image_url,
+        vendor_id=p.vendor_id,
+        vendor_name=p.vendor_name,
+        farm_name=p.farm_name,
+        rating=p.rating,
+        reviews_count=p.reviews_count,
+        is_active=p.is_active,
+        created_at=p.created_at,
+    )
+
+
+# ─── Image Upload ─────────────────────────────────────────────────────────────
+
+@router.post("/upload-image", tags=["Products"])
+async def upload_product_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_vendor),
+):
+    """
+    Upload a product image to Supabase Storage.
+    Returns the public CDN URL to be stored as `image_url` on the product.
+    """
+    ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{content_type}'. Use JPEG, PNG, or WEBP.",
+        )
+
+    ext = mimetypes.guess_extension(content_type) or ".jpg"
+    if ext == ".jpe":
+        ext = ".jpg"
+
+    storage_path = f"vendors/{current_user.id}/{uuid.uuid4().hex}{ext}"
+    data = await file.read()
+    upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
+        path=storage_path, file=data, file_options={"content-type": content_type},
+    )
+    upload_error = getattr(upload_result, "error", None)
+    if upload_error is None and isinstance(upload_result, dict):
+        upload_error = upload_result.get("error")
+
+    if upload_error:
+        message = getattr(upload_error, "message", None)
+        if message is None and isinstance(upload_error, dict):
+            message = upload_error.get("message")
+        raise HTTPException(status_code=502, detail=f"Image upload failed: {message or 'Unknown storage error'}")
+    return {"image_url": get_public_url(storage_path), "path": storage_path}
+
+
+# ─── Product CRUD ─────────────────────────────────────────────────────────────
+
+@router.get("/", response_model=List[ProductPublic])
+def list_products(
+    q: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    sort: Optional[str] = Query(None, description="freshness | price | name | rating"),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    stmt = select(Product).where(Product.is_active == True)
+    if category:
+        stmt = stmt.where(Product.category == category)
+    products = list(session.exec(stmt).all())
+
+    if q:
+        ql = q.lower()
+        products = [
+            p for p in products
+            if ql in p.name.lower() or (p.description and ql in p.description.lower())
+        ]
+
+    if sort == "price":
+        products.sort(key=lambda p: p.price)
+    elif sort == "name":
+        products.sort(key=lambda p: p.name)
+    elif sort == "rating":
+        products.sort(key=lambda p: p.rating, reverse=True)
+    else:
+        products.sort(key=lambda p: p.freshness, reverse=True)
+
+    return [_to_public(p) for p in products]
+
+
+@router.get("/mine", response_model=List[ProductPublic])
+def my_products(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_vendor),
+):
+    """Vendor: list only their own products (incl. inactive)."""
+    products = session.exec(
+        select(Product).where(Product.vendor_id == current_user.id)
+    ).all()
+    return [_to_public(p) for p in products]
+
+
+@router.get("/{product_id}", response_model=ProductPublic)
+def get_product(
+    product_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    product = session.get(Product, product_id)
+    if not product or not product.is_active:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return _to_public(product)
+
+
+@router.post("/", response_model=ProductPublic, status_code=201)
+def create_product(
+    body: ProductCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_vendor),
+):
+    product = Product(
+        name=body.name,
+        description=body.description,
+        price=body.price,
+        unit=body.unit,
+        category=body.category,
+        tags_json=json.dumps(body.tags),
+        freshness=body.freshness,
+        image_url=body.image_url,
+        vendor_id=current_user.id,
+        # Denormalize vendor info at creation time
+        vendor_name=current_user.name,
+        farm_name=current_user.farm_name,
+    )
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+    return _to_public(product)
+
+
+@router.patch("/{product_id}", response_model=ProductPublic)
+def update_product(
+    product_id: int,
+    body: ProductUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_vendor),
+):
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.vendor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your product")
+
+    update_data = body.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "tags":
+            product.set_tags(value)
+        else:
+            setattr(product, field, value)
+
+    session.add(product)
+    session.commit()
+    session.refresh(product)
+    return _to_public(product)
+
+
+@router.delete("/{product_id}")
+def delete_product(
+    product_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_vendor),
+):
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.vendor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your product")
+
+    product.is_active = False   # soft-delete
+    session.add(product)
+    session.commit()
+    return {"message": "Product removed"}
