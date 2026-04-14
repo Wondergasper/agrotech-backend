@@ -1,6 +1,7 @@
 import json
 import uuid
 import mimetypes
+import base64
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlmodel import Session, select
@@ -9,6 +10,7 @@ from app.models import Product, User
 from app.schemas import ProductCreate, ProductUpdate, ProductPublic
 from app.deps import get_current_user, require_vendor
 from app.storage import supabase, SUPABASE_BUCKET, get_public_url
+from app.ai_client import analyze_product_image
 
 router = APIRouter(prefix="/api/products", tags=["Products"])
 
@@ -39,11 +41,16 @@ def _to_public(p: Product) -> ProductPublic:
 @router.post("/upload-image", tags=["Products"])
 async def upload_product_image(
     file: UploadFile = File(...),
+    analyze: bool = Query(default=False, description="Run AI analysis on the uploaded image"),
     current_user: User = Depends(require_vendor),
 ):
     """
     Upload a product image to Supabase Storage.
     Returns the public CDN URL to be stored as `image_url` on the product.
+
+    If `analyze=true`, the image is also sent to the AI analysis service
+    and the results (category, tags, freshness_score, defects) are returned
+    alongside the URL for use during product creation.
     """
     ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
     content_type = file.content_type or ""
@@ -57,8 +64,9 @@ async def upload_product_image(
     if ext == ".jpe":
         ext = ".jpg"
 
-    storage_path = f"vendors/{current_user.id}/{uuid.uuid4().hex}{ext}"
     data = await file.read()
+
+    storage_path = f"vendors/{current_user.id}/{uuid.uuid4().hex}{ext}"
     upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
         path=storage_path, file=data, file_options={"content-type": content_type},
     )
@@ -71,7 +79,20 @@ async def upload_product_image(
         if message is None and isinstance(upload_error, dict):
             message = upload_error.get("message")
         raise HTTPException(status_code=502, detail=f"Image upload failed: {message or 'Unknown storage error'}")
-    return {"image_url": get_public_url(storage_path), "path": storage_path}
+
+    image_url = get_public_url(storage_path)
+    response = {"image_url": image_url, "path": storage_path}
+
+    # Optional AI analysis
+    if analyze:
+        base64_image = base64.b64encode(data).decode("utf-8")
+        ai_result = await analyze_product_image(base64_image)
+        if ai_result and "error" not in ai_result:
+            response["analysis"] = ai_result
+        elif ai_result and "error" in ai_result:
+            response["analysis"] = ai_result
+
+    return response
 
 
 # ─── Product CRUD ─────────────────────────────────────────────────────────────
