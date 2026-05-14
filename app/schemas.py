@@ -96,6 +96,10 @@ class ProductUpdate(BaseModel):
     image_url: Optional[str] = None
     is_active: Optional[bool] = None
 
+
+class ProductImageAnalysisRequest(BaseModel):
+    image: str
+
 class ProductPublic(BaseModel):
     id: int
     name: str

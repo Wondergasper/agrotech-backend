@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlmodel import Session, select
 from app.database import get_session
 from app.models import Product, User
-from app.schemas import ProductCreate, ProductUpdate, ProductPublic
+from app.schemas import (
+    ProductCreate,
+    ProductImageAnalysisRequest,
+    ProductPublic,
+    ProductUpdate,
+)
 from app.deps import get_current_user, require_vendor
 from app.storage import get_supabase_client, SUPABASE_BUCKET, get_public_url
 from app.ai_client import analyze_product_image
@@ -92,6 +97,21 @@ async def upload_product_image(
             response["analysis"] = ai_result
 
     return response
+
+
+@router.post("/analyze-image", tags=["Products"])
+async def analyze_product_image_route(
+    body: ProductImageAnalysisRequest,
+    current_user: User = Depends(require_vendor),
+):
+    """
+    Proxy AI image analysis through the main backend so the mobile client only
+    depends on one authenticated API surface for the product upload flow.
+    """
+    ai_result = await analyze_product_image(body.image)
+    if not ai_result:
+        raise HTTPException(status_code=502, detail="Image analysis is unavailable right now.")
+    return ai_result
 
 
 # ─── Product CRUD ─────────────────────────────────────────────────────────────
