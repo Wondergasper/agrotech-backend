@@ -1,6 +1,5 @@
 import json
 import uuid
-import mimetypes
 import base64
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -9,7 +8,7 @@ from app.database import get_session
 from app.models import Product, User
 from app.schemas import ProductCreate, ProductUpdate, ProductPublic
 from app.deps import get_current_user, require_vendor
-from app.storage import supabase, SUPABASE_BUCKET, get_public_url
+from app.storage import get_supabase_client, SUPABASE_BUCKET, get_public_url
 from app.ai_client import analyze_product_image
 
 router = APIRouter(prefix="/api/products", tags=["Products"])
@@ -25,6 +24,7 @@ def _to_public(p: Product) -> ProductPublic:
         category=p.category,
         tags=p.get_tags(),
         freshness=p.freshness,
+        quantity=p.quantity,
         image_url=p.image_url,
         vendor_id=p.vendor_id,
         vendor_name=p.vendor_name,
@@ -37,6 +37,11 @@ def _to_public(p: Product) -> ProductPublic:
 
 
 # ─── Image Upload ─────────────────────────────────────────────────────────────
+
+_ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_EXT_MAP = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+
 
 @router.post("/upload-image", tags=["Products"])
 async def upload_product_image(
@@ -52,44 +57,38 @@ async def upload_product_image(
     and the results (category, tags, freshness_score, defects) are returned
     alongside the URL for use during product creation.
     """
-    ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
     content_type = file.content_type or ""
-    if content_type not in ALLOWED_TYPES:
+    if content_type not in _ALLOWED_TYPES:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type '{content_type}'. Use JPEG, PNG, or WEBP.",
         )
 
-    ext = mimetypes.guess_extension(content_type) or ".jpg"
-    if ext == ".jpe":
-        ext = ".jpg"
+    ext = _EXT_MAP[content_type]
 
-    data = await file.read()
+    # Read with a 1-byte overage to detect files that exceed the limit
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image must be under 5 MB.")
 
     storage_path = f"vendors/{current_user.id}/{uuid.uuid4().hex}{ext}"
-    upload_result = supabase.storage.from_(SUPABASE_BUCKET).upload(
-        path=storage_path, file=data, file_options={"content-type": content_type},
-    )
-    upload_error = getattr(upload_result, "error", None)
-    if upload_error is None and isinstance(upload_result, dict):
-        upload_error = upload_result.get("error")
 
-    if upload_error:
-        message = getattr(upload_error, "message", None)
-        if message is None and isinstance(upload_error, dict):
-            message = upload_error.get("message")
-        raise HTTPException(status_code=502, detail=f"Image upload failed: {message or 'Unknown storage error'}")
+    try:
+        client = get_supabase_client()
+        client.storage.from_(SUPABASE_BUCKET).upload(
+            path=storage_path, file=data, file_options={"content-type": content_type},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Image upload failed: {exc}")
 
     image_url = get_public_url(storage_path)
-    response = {"image_url": image_url, "path": storage_path}
+    response: dict = {"image_url": image_url, "path": storage_path}
 
     # Optional AI analysis
     if analyze:
         base64_image = base64.b64encode(data).decode("utf-8")
         ai_result = await analyze_product_image(base64_image)
-        if ai_result and "error" not in ai_result:
-            response["analysis"] = ai_result
-        elif ai_result and "error" in ai_result:
+        if ai_result:
             response["analysis"] = ai_result
 
     return response
@@ -167,6 +166,7 @@ def create_product(
         category=body.category,
         tags_json=json.dumps(body.tags),
         freshness=body.freshness,
+        quantity=body.quantity,
         image_url=body.image_url,
         vendor_id=current_user.id,
         # Denormalize vendor info at creation time

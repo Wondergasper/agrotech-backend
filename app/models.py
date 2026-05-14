@@ -58,6 +58,7 @@ class Product(SQLModel, table=True):
     category: str = Field(default="general")
     tags_json: str = Field(default="[]")    # JSON string e.g. '["organic","fresh"]'
     freshness: int = Field(default=85)
+    quantity: Optional[int] = None          # Stock quantity (units available)
     image_url: Optional[str] = None
     vendor_id: int = Field(foreign_key="user.id")
 

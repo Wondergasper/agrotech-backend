@@ -81,6 +81,7 @@ class ProductCreate(BaseModel):
     category: str = "general"
     tags: List[str] = []
     freshness: int = 85
+    quantity: Optional[int] = None
     image_url: Optional[str] = None
 
 class ProductUpdate(BaseModel):
@@ -91,6 +92,7 @@ class ProductUpdate(BaseModel):
     category: Optional[str] = None
     tags: Optional[List[str]] = None
     freshness: Optional[int] = None
+    quantity: Optional[int] = None
     image_url: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -103,6 +105,7 @@ class ProductPublic(BaseModel):
     category: str
     tags: List[str]
     freshness: int
+    quantity: Optional[int]
     image_url: Optional[str]
     vendor_id: int
     vendor_name: Optional[str]
