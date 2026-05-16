@@ -27,6 +27,11 @@ class ResetPasswordRequest(BaseModel):
     token: str           # OTP / reset code sent to the user's email
     new_password: str
 
+class UnauthenticatedChangePasswordRequest(BaseModel):
+    email: EmailStr
+    current_password: str
+    new_password: str
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
