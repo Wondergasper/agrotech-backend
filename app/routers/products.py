@@ -13,7 +13,12 @@ from app.schemas import (
     ProductUpdate,
 )
 from app.deps import get_current_user, require_vendor
-from app.storage import get_supabase_client, SUPABASE_BUCKET, get_public_url
+from app.storage import (
+    ensure_storage_bucket,
+    get_public_url,
+    get_supabase_client,
+    SUPABASE_BUCKET,
+)
 from app.ai_client import analyze_product_image
 
 router = APIRouter(prefix="/api/products", tags=["Products"])
@@ -80,6 +85,7 @@ async def upload_product_image(
 
     try:
         client = get_supabase_client()
+        ensure_storage_bucket(client)
         client.storage.from_(SUPABASE_BUCKET).upload(
             path=storage_path, file=data, file_options={"content-type": content_type},
         )
