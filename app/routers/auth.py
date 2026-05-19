@@ -76,20 +76,17 @@ def reset_password(body: ResetPasswordRequest, session: Session = Depends(get_se
     WARNING: This is highly insecure as it allows anyone to reset any user's password
     knowing only their email address. Recommended only for development/local testing.
     """
-    if body.new_password != body.confirm_password:
-        raise HTTPException(status_code=400, detail="New passwords do not match")
-
     email = body.email.lower()
     user = session.exec(select(User).where(User.email == email)).first()
     
     if not user:
-        # In a real app, you might still want to return 404 or 200 depending on enumeration policy
         raise HTTPException(status_code=404, detail="User not found")
 
     user.hashed_password = hash_password(body.new_password)
     session.add(user)
     session.commit()
     return {"message": "Password updated successfully. Please sign in."}
+
 
 
 

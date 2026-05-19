@@ -26,7 +26,7 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
     new_password: str
-    confirm_password: str
+
 
 
 class UnauthenticatedChangePasswordRequest(BaseModel):
