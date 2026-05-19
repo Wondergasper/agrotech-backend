@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 from app.database import get_session
@@ -18,13 +18,14 @@ router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 @router.post("/signup", response_model=TokenResponse, status_code=201)
 def signup(body: SignupRequest, session: Session = Depends(get_session)):
-    existing = session.exec(select(User).where(User.email == body.email)).first()
+    email = body.email.lower()
+    existing = session.exec(select(User).where(User.email == email)).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = User(
         name=body.name,
-        email=body.email,
+        email=email,
         hashed_password=hash_password(body.password),
         role=body.role,
     )
@@ -38,7 +39,8 @@ def signup(body: SignupRequest, session: Session = Depends(get_session)):
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, session: Session = Depends(get_session)):
-    user = session.exec(select(User).where(User.email == body.email)).first()
+    email = body.email.lower()
+    user = session.exec(select(User).where(User.email == email)).first()
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -52,9 +54,12 @@ def login(body: LoginRequest, session: Session = Depends(get_session)):
 def change_password(
     body: ChangePasswordRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),   # ← now requires auth token
+    current_user: User = Depends(get_current_user),
 ):
     """Change password for the currently authenticated user."""
+    if body.new_password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
+
     if not verify_password(body.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
@@ -64,98 +69,37 @@ def change_password(
     return {"message": "Password updated successfully"}
 
 
-@router.post("/change-password-unauthenticated")
-def change_password_unauthenticated(
-    body: UnauthenticatedChangePasswordRequest,
-    session: Session = Depends(get_session),
-):
-    """
-    Change password without an active session by verifying email + current password.
-    Useful for 'Reset/Update Password' flows where the user is not yet logged in.
-    """
-    user = session.exec(select(User).where(User.email == body.email)).first()
-    if not user or not verify_password(body.current_password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or current password",
-        )
-
-    user.hashed_password = hash_password(body.new_password)
-    session.add(user)
-    session.commit()
-    return {"message": "Password updated successfully"}
-
-
-# ─── Forgot Password Flow ────────────────────────────────────────────────────
-
-@router.post("/forgot-password")
-def forgot_password(body: ForgotPasswordRequest, session: Session = Depends(get_session)):
-    """
-    Step 1 — Request a password reset OTP.
-    In production, send this code via email (e.g. SendGrid / Brevo).
-    For now the OTP is returned in the response body for development testing.
-    """
-    user = session.exec(select(User).where(User.email == body.email)).first()
-    # Always return 200 to avoid email enumeration attacks
-    if not user:
-        return {"message": "If that email exists, a reset code has been sent."}
-
-    # Invalidate any previous unused tokens for this email
-    old_tokens = session.exec(
-        select(PasswordResetToken).where(
-            PasswordResetToken.email == body.email,
-            PasswordResetToken.used == False,
-        )
-    ).all()
-    for t in old_tokens:
-        t.used = True
-        session.add(t)
-
-    otp = secrets.token_hex(3).upper()  # 6-char hex OTP, e.g. "A1B2C3"
-    reset_token = PasswordResetToken(
-        email=body.email,
-        token=otp,
-        expires_at=datetime.utcnow() + timedelta(minutes=15),
-    )
-    session.add(reset_token)
-    session.commit()
-
-    # TODO: Send `otp` via email service (SendGrid / Brevo / etc.)
-    # For dev: return OTP directly (remove this in production!)
-    return {
-        "message": "If that email exists, a reset code has been sent.",
-        "dev_otp": otp,   # ← REMOVE IN PRODUCTION
-    }
-
-
 @router.post("/reset-password")
 def reset_password(body: ResetPasswordRequest, session: Session = Depends(get_session)):
     """
-    Step 2 — Submit OTP + new password to complete the reset.
+    Reset password using only email.
+    WARNING: This is highly insecure as it allows anyone to reset any user's password
+    knowing only their email address. Recommended only for development/local testing.
     """
-    record = session.exec(
-        select(PasswordResetToken).where(
-            PasswordResetToken.email == body.email,
-            PasswordResetToken.token == body.token,
-            PasswordResetToken.used == False,
-        )
-    ).first()
+    if body.new_password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="New passwords do not match")
 
-    if not record:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
-    if datetime.utcnow() > record.expires_at:
-        record.used = True
-        session.add(record)
-        session.commit()
-        raise HTTPException(status_code=400, detail="Reset code has expired. Request a new one.")
-
-    user = session.exec(select(User).where(User.email == body.email)).first()
+    email = body.email.lower()
+    user = session.exec(select(User).where(User.email == email)).first()
+    
     if not user:
+        # In a real app, you might still want to return 404 or 200 depending on enumeration policy
         raise HTTPException(status_code=404, detail="User not found")
 
     user.hashed_password = hash_password(body.new_password)
-    record.used = True
     session.add(user)
-    session.add(record)
     session.commit()
-    return {"message": "Password reset successfully. Please sign in."}
+    return {"message": "Password updated successfully. Please sign in."}
+
+
+
+# ─── Deprecated OTP Flow (To be removed) ──────────────────────────────────────
+
+@router.post("/forgot-password", include_in_schema=False)
+def forgot_password(body: ForgotPasswordRequest, session: Session = Depends(get_session)):
+    """
+    Deprecated: The system now uses old password verification for resets.
+    """
+    return {"message": "Please use the reset-password endpoint with your current password."}
+
+

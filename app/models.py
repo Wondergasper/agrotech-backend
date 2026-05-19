@@ -1,7 +1,11 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from sqlmodel import SQLModel, Field
+
+
+def utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class User(SQLModel, table=True):
@@ -25,7 +29,7 @@ class User(SQLModel, table=True):
     health_tags_json: str = Field(default="[]")   # JSON string e.g. '["diabetes"]'
     preferences_json: str = Field(default="[]")   # JSON string e.g. '["Nearby farms"]'
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
     def get_health_tags(self) -> List[str]:
@@ -71,7 +75,7 @@ class Product(SQLModel, table=True):
     reviews_count: int = Field(default=0)
 
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
     def get_tags(self) -> List[str]:
         try:
@@ -94,7 +98,7 @@ class Order(SQLModel, table=True):
     quantity: int = Field(default=1)
     total_price: float
     status: str = Field(default="pending")    # pending | confirmed | delivered | cancelled
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class Review(SQLModel, table=True):
@@ -106,7 +110,7 @@ class Review(SQLModel, table=True):
     order_id: Optional[int] = Field(default=None, foreign_key="order.id")  # Ensures purchase-verified reviews
     rating: int = Field(ge=1, le=5)         # 1–5 stars
     comment: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class PasswordResetToken(SQLModel, table=True):
@@ -118,4 +122,5 @@ class PasswordResetToken(SQLModel, table=True):
     token: str = Field(index=True)          # 6-digit OTP or UUID
     expires_at: datetime
     used: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
+

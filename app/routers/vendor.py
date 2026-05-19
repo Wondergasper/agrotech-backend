@@ -4,7 +4,8 @@ Vendor-specific analytics endpoints.
 GET /api/vendor/stats   — Quick KPIs for the VendorHomeScreen dashboard
 GET /api/vendor/analytics — Period-based analytics for the Analytics/Payments screen
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session, select, func
@@ -23,7 +24,7 @@ VALID_PERIODS = {"today", "week", "month", "all"}
 
 
 def _period_start(period: str) -> Optional[datetime]:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     if period == "today":
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif period == "week":
@@ -48,7 +49,7 @@ def vendor_stats(
     - pending_orders   : orders awaiting confirmation
     """
     vendor_id = current_user.id
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(timezone.utc).replace(tzinfo=None).replace(hour=0, minute=0, second=0, microsecond=0)
 
     all_orders = session.exec(
         select(Order).where(Order.vendor_id == vendor_id)
@@ -104,7 +105,7 @@ def vendor_analytics(
     avg_order = round(revenue / order_count, 2) if order_count else 0.0
 
     # ── Daily breakdown (last 7 days always, independent of period) ──────────
-    daily_start = datetime.utcnow() - timedelta(days=6)
+    daily_start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=6)
     daily_start = daily_start.replace(hour=0, minute=0, second=0, microsecond=0)
 
     daily_orders = session.exec(

@@ -18,14 +18,16 @@ class LoginRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+    confirm_password: str
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
-    token: str           # OTP / reset code sent to the user's email
     new_password: str
+    confirm_password: str
+
 
 class UnauthenticatedChangePasswordRequest(BaseModel):
     email: EmailStr
