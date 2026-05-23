@@ -7,6 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import Session, select
 from app.database import get_session
 from app.models import User
+from app.schemas import UserPublic
 import os
 from dotenv import load_dotenv
 
@@ -34,6 +35,17 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def get_user_public(user: User) -> UserPublic:
+    """Helper to convert User model to UserPublic schema consistently."""
+    data = user.model_dump()
+    data["roles"] = user.get_roles()
+    data["activeRole"] = user.active_role
+    data["health_tags"] = user.get_health_tags()
+    data["preferences"] = user.get_preferences()
+    # Backward compatibility for 'role' field is handled by pydantic automatically 
+    # since it exists on the model, but let's be explicit if needed.
+    return UserPublic(**data)
+
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -59,12 +71,12 @@ def get_current_user(
 
 
 def require_vendor(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != "vendor":
-        raise HTTPException(status_code=403, detail="Vendors only")
+    if current_user.active_role != "vendor":
+        raise HTTPException(status_code=403, detail="Active role must be vendor")
     return current_user
 
 
 def require_consumer(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != "consumer":
-        raise HTTPException(status_code=403, detail="Consumers only")
+    if current_user.active_role != "consumer":
+        raise HTTPException(status_code=403, detail="Active role must be consumer")
     return current_user

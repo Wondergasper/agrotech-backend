@@ -37,6 +37,9 @@ class UnauthenticatedChangePasswordRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: "UserPublic"
+    roles: List[str]
+    activeRole: str
 
 
 # ─── Users ───────────────────────────────────────────────────────────────────
@@ -46,7 +49,9 @@ class UserPublic(BaseModel):
     name: str
     email: str
     phone: Optional[str]
-    role: Optional[str]
+    role: Optional[str]  # Backward compatibility
+    roles: List[str]
+    activeRole: str
     avatar_url: Optional[str]
     farm_name: Optional[str]
     farm_location: Optional[str]
@@ -75,6 +80,9 @@ class UpdateFarmRequest(BaseModel):
     farm_type: Optional[str] = None
 
 class UpdateRoleRequest(BaseModel):
+    role: str   # "vendor" | "consumer"
+
+class SwitchRoleRequest(BaseModel):
     role: str   # "vendor" | "consumer"
 
 

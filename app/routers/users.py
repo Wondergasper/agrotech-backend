@@ -7,34 +7,16 @@ from app.schemas import (
     UserPublic, UpdateProfileRequest, UpdatePreferencesRequest,
     UpdateFarmRequest, UpdateRoleRequest,
 )
-from app.deps import get_current_user
+from app.deps import get_current_user, get_user_public
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
 VALID_ROLES = {"vendor", "consumer"}
 
 
-def _to_public(user: User) -> UserPublic:
-    return UserPublic(
-        id=user.id,
-        name=user.name,
-        email=user.email,
-        phone=user.phone,
-        role=user.role,
-        avatar_url=user.avatar_url,
-        farm_name=user.farm_name,
-        farm_location=user.farm_location,
-        farm_type=user.farm_type,
-        budget=user.budget,
-        health_tags=user.get_health_tags(),
-        preferences=user.get_preferences(),
-        created_at=user.created_at,
-    )
-
-
 @router.get("/me", response_model=UserPublic)
 def get_me(current_user: User = Depends(get_current_user)):
-    return _to_public(current_user)
+    return get_user_public(current_user)
 
 
 @router.patch("/me", response_model=UserPublic)
@@ -52,7 +34,7 @@ def update_profile(
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return _to_public(current_user)
+    return get_user_public(current_user)
 
 
 @router.patch("/me/preferences", response_model=UserPublic)
@@ -70,7 +52,7 @@ def update_preferences(
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return _to_public(current_user)
+    return get_user_public(current_user)
 
 
 @router.patch("/me/farm", response_model=UserPublic)
@@ -88,7 +70,7 @@ def update_farm(
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return _to_public(current_user)
+    return get_user_public(current_user)
 
 
 @router.patch("/me/role", response_model=UserPublic)
@@ -107,4 +89,4 @@ def update_role(
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return _to_public(current_user)
+    return get_user_public(current_user)

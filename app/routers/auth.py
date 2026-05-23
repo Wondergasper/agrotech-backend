@@ -7,10 +7,11 @@ from app.models import User, PasswordResetToken
 from app.schemas import (
     SignupRequest, LoginRequest, ChangePasswordRequest,
     ForgotPasswordRequest, ResetPasswordRequest, TokenResponse,
-    UnauthenticatedChangePasswordRequest,
+    UnauthenticatedChangePasswordRequest, SwitchRoleRequest,
 )
 from app.deps import (
     hash_password, verify_password, create_access_token, get_current_user,
+    get_user_public,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
@@ -27,14 +28,22 @@ def signup(body: SignupRequest, session: Session = Depends(get_session)):
         name=body.name,
         email=email,
         hashed_password=hash_password(body.password),
-        role=body.role,
+        role=body.role, # Backward compatibility
+        active_role=body.role,
     )
+    user.set_roles([body.role])
+    
     session.add(user)
     session.commit()
     session.refresh(user)
 
     token = create_access_token({"sub": str(user.id)})
-    return TokenResponse(access_token=token)
+    return TokenResponse(
+        access_token=token,
+        user=get_user_public(user),
+        roles=user.get_roles(),
+        activeRole=user.active_role
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -46,8 +55,74 @@ def login(body: LoginRequest, session: Session = Depends(get_session)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    
+    # Ensure roles/active_role are set for old users on login if missing
+    roles = user.get_roles()
+    if not roles and user.role:
+        user.set_roles([user.role])
+        user.active_role = user.role
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
     token = create_access_token({"sub": str(user.id)})
-    return TokenResponse(access_token=token)
+    return TokenResponse(
+        access_token=token,
+        user=get_user_public(user),
+        roles=user.get_roles(),
+        activeRole=user.active_role
+    )
+
+
+@router.patch("/switch-role", response_model=TokenResponse)
+def switch_role(
+    body: SwitchRoleRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    roles = current_user.get_roles()
+    if body.role not in roles:
+        raise HTTPException(status_code=400, detail=f"User does not have role: {body.role}")
+    
+    current_user.active_role = body.role
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+
+    token = create_access_token({"sub": str(current_user.id)})
+    return TokenResponse(
+        access_token=token,
+        user=get_user_public(current_user),
+        roles=current_user.get_roles(),
+        activeRole=current_user.active_role
+    )
+
+
+@router.post("/become-vendor", response_model=TokenResponse)
+def become_vendor(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    roles = current_user.get_roles()
+    if "vendor" not in roles:
+        roles.append("vendor")
+        current_user.set_roles(roles)
+    
+    current_user.active_role = "vendor"
+    # Backward compatibility field
+    current_user.role = "vendor"
+    
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+
+    token = create_access_token({"sub": str(current_user.id)})
+    return TokenResponse(
+        access_token=token,
+        user=get_user_public(current_user),
+        roles=current_user.get_roles(),
+        activeRole=current_user.active_role
+    )
 
 
 @router.post("/change-password")

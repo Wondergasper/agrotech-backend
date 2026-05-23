@@ -16,7 +16,9 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     hashed_password: str
     phone: Optional[str] = None
-    role: Optional[str] = None          # "vendor" | "consumer"
+    role: Optional[str] = None          # Deprecated: "vendor" | "consumer" (Keep for compatibility)
+    roles_json: str = Field(default='["consumer"]')  # JSON string e.g. '["consumer", "vendor"]'
+    active_role: str = Field(default="consumer")     # "consumer" | "vendor"
     avatar_url: Optional[str] = None    # Profile photo URL (Supabase Storage)
 
     # Vendor-specific
@@ -32,6 +34,15 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
+    def get_roles(self) -> List[str]:
+        try:
+            return json.loads(self.roles_json)
+        except Exception:
+            return ["consumer"]
+
+    def set_roles(self, roles: List[str]) -> None:
+        self.roles_json = json.dumps(roles)
+
     def get_health_tags(self) -> List[str]:
         try:
             return json.loads(self.health_tags_json)
