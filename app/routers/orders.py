@@ -121,12 +121,12 @@ def update_order_status(
         raise HTTPException(status_code=404, detail="Order not found")
 
     # Vendors can confirm/deliver; consumers can only cancel their own pending orders
-    if current_user.role == "vendor":
+    if current_user.active_role == "vendor":
         if order.vendor_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not your order")
         if body.status == "cancelled":
             raise HTTPException(status_code=403, detail="Vendors cannot cancel orders — use the consumer cancellation flow")
-    elif current_user.role == "consumer":
+    elif current_user.active_role == "consumer":
         if order.consumer_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not your order")
         if body.status != "cancelled":
