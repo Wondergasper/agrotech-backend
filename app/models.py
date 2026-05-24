@@ -21,6 +21,10 @@ class User(SQLModel, table=True):
     active_role: str = Field(default="consumer")     # "consumer" | "vendor"
     avatar_url: Optional[str] = None    # Profile photo URL (Supabase Storage)
 
+    # Onboarding status
+    consumer_onboarding_completed: bool = Field(default=False)
+    vendor_onboarding_completed: bool = Field(default=False)
+
     # Vendor-specific
     farm_name: Optional[str] = None
     farm_location: Optional[str] = None

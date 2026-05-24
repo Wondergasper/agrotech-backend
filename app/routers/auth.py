@@ -114,17 +114,59 @@ def switch_role(
     )
 
 
-@router.post("/become-vendor", response_model=TokenResponse)
-def become_vendor(
+@router.post("/become-consumer", response_model=TokenResponse)
+def become_consumer(
+    body: BecomeConsumerRequest,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
+    """Consumer Onboarding Completion: saves profile data and grants consumer role."""
+    if body.budget is not None:
+        current_user.budget = body.budget
+    if body.health_tags is not None:
+        current_user.set_health_tags(body.health_tags)
+    if body.preferences is not None:
+        current_user.set_preferences(body.preferences)
+    
+    roles = current_user.get_roles()
+    if "consumer" not in roles:
+        roles.append("consumer")
+        current_user.set_roles(roles)
+    
+    current_user.active_role = "consumer"
+    current_user.consumer_onboarding_completed = True
+    
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+
+    token = create_access_token({"sub": str(current_user.id)})
+    return TokenResponse(
+        access_token=token,
+        user=get_user_public(current_user),
+        roles=current_user.get_roles(),
+        activeRole=current_user.active_role
+    )
+
+
+@router.post("/become-vendor", response_model=TokenResponse)
+def become_vendor(
+    body: BecomeVendorRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Vendor Onboarding Completion: saves farm data and grants vendor role."""
+    current_user.farm_name = body.farm_name
+    current_user.farm_location = body.farm_location
+    current_user.farm_type = body.farm_type
+    
     roles = current_user.get_roles()
     if "vendor" not in roles:
         roles.append("vendor")
         current_user.set_roles(roles)
     
     current_user.active_role = "vendor"
+    current_user.vendor_onboarding_completed = True
     # Backward compatibility field
     current_user.role = "vendor"
     

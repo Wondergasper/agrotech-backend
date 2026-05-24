@@ -52,6 +52,8 @@ class UserPublic(BaseModel):
     role: Optional[str]  # Backward compatibility
     roles: List[str]
     activeRole: str
+    consumerOnboardingCompleted: bool
+    vendorOnboardingCompleted: bool
     avatar_url: Optional[str]
     farm_name: Optional[str]
     farm_location: Optional[str]
@@ -63,6 +65,16 @@ class UserPublic(BaseModel):
 
     class Config:
         from_attributes = True
+
+class BecomeConsumerRequest(BaseModel):
+    budget: Optional[int] = None
+    health_tags: Optional[List[str]] = None
+    preferences: Optional[List[str]] = None
+
+class BecomeVendorRequest(BaseModel):
+    farm_name: str
+    farm_location: str
+    farm_type: str
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
