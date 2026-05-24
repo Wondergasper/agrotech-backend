@@ -38,12 +38,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def get_user_public(user: User) -> UserPublic:
     """Helper to convert User model to UserPublic schema consistently."""
     data = user.model_dump()
-    data["roles"] = user.get_roles()
-    data["activeRole"] = user.active_role
-    data["health_tags"] = user.get_health_tags()
-    data["preferences"] = user.get_preferences()
-    # Backward compatibility for 'role' field is handled by pydantic automatically 
-    # since it exists on the model, but let's be explicit if needed.
+    
+    # Safe fallbacks for new fields in case DB columns are missing
+    data["roles"] = user.get_roles() if hasattr(user, "get_roles") else [getattr(user, "role", "consumer")]
+    data["activeRole"] = getattr(user, "active_role", None) or getattr(user, "role", "consumer")
+    
+    # Handle JSON lists
+    data["health_tags"] = user.get_health_tags() if hasattr(user, "get_health_tags") else []
+    data["preferences"] = user.get_preferences() if hasattr(user, "get_preferences") else []
+    
     return UserPublic(**data)
 
 

@@ -56,20 +56,36 @@ def login(body: LoginRequest, session: Session = Depends(get_session)):
             detail="Invalid email or password",
         )
     
-    # Ensure roles/active_role are set for old users on login if missing
-    roles = user.get_roles()
-    if not roles and user.role:
-        user.set_roles([user.role])
-        user.active_role = user.role
-        session.add(user)
-        session.commit()
-        session.refresh(user)
+    # --- Robust Migration for Old Users ---
+    # We use getattr safely in case the columns don't exist in DB yet or are NULL
+    try:
+        raw_roles = getattr(user, "roles_json", None)
+        roles = json.loads(raw_roles) if raw_roles else []
+    except Exception:
+        roles = []
+
+    if not roles:
+        # Fallback to the old 'role' field or default to consumer
+        legacy_role = getattr(user, "role", None) or "consumer"
+        roles = [legacy_role]
+        try:
+            user.set_roles(roles)
+            user.active_role = legacy_role
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        except Exception:
+            session.rollback()
+            # If DB columns are missing, we still want to return a successful response
+            # with these values in memory for the response schema
+            user.roles_json = json.dumps(roles)
+            user.active_role = legacy_role
 
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
         user=get_user_public(user),
-        roles=user.get_roles(),
+        roles=roles,
         activeRole=user.active_role
     )
 
