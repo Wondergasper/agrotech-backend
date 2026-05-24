@@ -243,7 +243,6 @@ def delete_product(
     if product.vendor_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your product")
 
-    product.is_active = False   # soft-delete
-    session.add(product)
+    session.delete(product)
     session.commit()
-    return {"message": "Product removed"}
+    return {"message": "Product deleted successfully"}

@@ -39,11 +39,13 @@ def get_user_public(user: User) -> UserPublic:
     """Helper to convert User model to UserPublic schema consistently."""
     data = user.model_dump()
     
-    # Safe fallbacks for new fields in case DB columns are missing
-    data["roles"] = user.get_roles() if hasattr(user, "get_roles") else [getattr(user, "role", "consumer")]
-    data["activeRole"] = getattr(user, "active_role", None) or getattr(user, "role", "consumer")
-    data["consumerOnboardingCompleted"] = getattr(user, "consumer_onboarding_completed", False)
-    data["vendorOnboardingCompleted"] = getattr(user, "vendor_onboarding_completed", False)
+    # Safe fallbacks for new fields in case DB columns are missing or NULL
+    data["roles"] = user.get_roles() if hasattr(user, "get_roles") else [getattr(user, "role", "consumer") or "consumer"]
+    data["activeRole"] = getattr(user, "active_role", None) or getattr(user, "role", "consumer") or "consumer"
+    
+    # Ensure boolean flags are actually bool, not None
+    data["consumerOnboardingCompleted"] = bool(getattr(user, "consumer_onboarding_completed", False))
+    data["vendorOnboardingCompleted"] = bool(getattr(user, "vendor_onboarding_completed", False))
     
     # Handle JSON lists
     data["health_tags"] = user.get_health_tags() if hasattr(user, "get_health_tags") else []

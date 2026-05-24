@@ -8,6 +8,7 @@ from app.schemas import (
     SignupRequest, LoginRequest, ChangePasswordRequest,
     ForgotPasswordRequest, ResetPasswordRequest, TokenResponse,
     UnauthenticatedChangePasswordRequest, SwitchRoleRequest,
+    BecomeConsumerRequest, BecomeVendorRequest,
 )
 from app.deps import (
     hash_password, verify_password, create_access_token, get_current_user,
@@ -101,6 +102,7 @@ def switch_role(
         raise HTTPException(status_code=400, detail=f"User does not have role: {body.role}")
     
     current_user.active_role = body.role
+    current_user.role = body.role  # Sync legacy field
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
@@ -134,6 +136,7 @@ def become_consumer(
         current_user.set_roles(roles)
     
     current_user.active_role = "consumer"
+    current_user.role = "consumer"  # Sync legacy field
     current_user.consumer_onboarding_completed = True
     
     session.add(current_user)
@@ -150,6 +153,7 @@ def become_consumer(
 
 
 @router.post("/become-vendor", response_model=TokenResponse)
+@router.post("/become-farmer", response_model=TokenResponse)
 def become_vendor(
     body: BecomeVendorRequest,
     current_user: User = Depends(get_current_user),
