@@ -8,6 +8,10 @@ def utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+from sqlalchemy.dialects import postgresql
+from sqlalchemy import Column, JSON
+
+
 class User(SQLModel, table=True):
     __tablename__ = "user"
 
@@ -16,10 +20,19 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     hashed_password: str
     phone: Optional[str] = None
-    role: Optional[str] = None          # Deprecated: "vendor" | "consumer" (Keep for compatibility)
-    roles_json: str = Field(default='["consumer"]')  # JSON string e.g. '["consumer", "vendor"]'
-    active_role: str = Field(default="consumer")     # "consumer" | "vendor"
-    avatar_url: Optional[str] = None    # Profile photo URL (Supabase Storage)
+    role: Optional[str] = None          # Deprecated: "vendor" | "consumer"
+    
+    # Use a type that works for both Postgres (ARRAY) and SQLite (JSON/TEXT)
+    # This ensures local tests pass while production uses Postgres features
+    roles: List[str] = Field(
+        default=["consumer"],
+        sa_column=Column(
+            postgresql.ARRAY(postgresql.TEXT).with_variant(JSON, "sqlite"),
+            default=["consumer"]
+        )
+    )
+    active_role: str = Field(default="consumer")
+    avatar_url: Optional[str] = None
 
     # Onboarding status
     consumer_onboarding_completed: bool = Field(default=False)
@@ -32,20 +45,19 @@ class User(SQLModel, table=True):
 
     # Consumer-specific
     budget: Optional[int] = None
-    health_tags_json: str = Field(default="[]")   # JSON string e.g. '["diabetes"]'
-    preferences_json: str = Field(default="[]")   # JSON string e.g. '["Nearby farms"]'
+    health_tags_json: str = Field(default="[]")
+    preferences_json: str = Field(default="[]")
 
     created_at: datetime = Field(default_factory=utc_now)
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
     def get_roles(self) -> List[str]:
-        try:
-            return json.loads(self.roles_json)
-        except Exception:
+        if self.roles is None:
             return ["consumer"]
+        return self.roles
 
     def set_roles(self, roles: List[str]) -> None:
-        self.roles_json = json.dumps(roles)
+        self.roles = roles
 
     def get_health_tags(self) -> List[str]:
         try:

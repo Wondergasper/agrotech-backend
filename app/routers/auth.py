@@ -32,8 +32,8 @@ def signup(body: SignupRequest, session: Session = Depends(get_session)):
         hashed_password=hash_password(body.password),
         role=body.role, # Backward compatibility
         active_role=body.role,
+        roles=[body.role]
     )
-    user.set_roles([body.role])
     
     session.add(user)
     session.commit()
@@ -43,7 +43,7 @@ def signup(body: SignupRequest, session: Session = Depends(get_session)):
     return TokenResponse(
         access_token=token,
         user=get_user_public(user),
-        roles=user.get_roles(),
+        roles=user.roles,
         activeRole=user.active_role
     )
 
@@ -59,35 +59,37 @@ def login(body: LoginRequest, session: Session = Depends(get_session)):
         )
     
     # --- Robust Migration for Old Users ---
-    # We use getattr safely in case the columns don't exist in DB yet or are NULL
-    try:
-        raw_roles = getattr(user, "roles_json", None)
-        roles = json.loads(raw_roles) if raw_roles else []
-    except Exception:
-        roles = []
+    # Handle cases where roles/active_role might be missing
+    roles = getattr(user, "roles", None)
+    active_role = getattr(user, "active_role", None)
+    legacy_role = getattr(user, "role", None)
 
     if not roles:
-        # Fallback to the old 'role' field or default to consumer
-        legacy_role = getattr(user, "role", None) or "consumer"
-        roles = [legacy_role]
-        try:
-            user.set_roles(roles)
-            user.active_role = legacy_role
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-        except Exception:
-            session.rollback()
-            # If DB columns are missing, we still want to return a successful response
-            # with these values in memory for the response schema
-            user.roles_json = json.dumps(roles)
-            user.active_role = legacy_role
+        roles = [legacy_role or "consumer"]
+        user.roles = roles
+    
+    if not active_role:
+        active_role = legacy_role or roles[0] or "consumer"
+        user.active_role = active_role
+
+    # Ensure active_role is always valid
+    if user.active_role not in roles:
+        user.active_role = roles[0]
+
+    try:
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    except Exception:
+        session.rollback()
+        # Even if commit fails (e.g. read-only DB), ensure the response has correct values
+        pass
 
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
         user=get_user_public(user),
-        roles=roles,
+        roles=user.roles,
         activeRole=user.active_role
     )
 
@@ -105,8 +107,13 @@ def switch_role(
     roles = current_user.get_roles()
     if target_role not in roles:
         raise HTTPException(
-            status_code=400, 
-            detail=f"User does not have role: {body.role}. Available roles: {', '.join(roles)}"
+            status_code=403,
+            detail={
+                "message": f"User does not have role: {body.role}",
+                "availableRoles": roles,
+                "requiresOnboarding": True,
+                "role": target_role
+            }
         )
     
     current_user.active_role = target_role
@@ -119,7 +126,7 @@ def switch_role(
     return TokenResponse(
         access_token=token,
         user=get_user_public(current_user),
-        roles=current_user.get_roles(),
+        roles=current_user.roles,
         activeRole=current_user.active_role
     )
 
@@ -138,10 +145,10 @@ def become_consumer(
     if body.preferences is not None:
         current_user.set_preferences(body.preferences)
     
-    roles = current_user.get_roles()
+    roles = list(current_user.get_roles())
     if "consumer" not in roles:
         roles.append("consumer")
-        current_user.set_roles(roles)
+        current_user.roles = roles
     
     current_user.active_role = "consumer"
     current_user.role = "consumer"  # Sync legacy field
@@ -155,7 +162,7 @@ def become_consumer(
     return TokenResponse(
         access_token=token,
         user=get_user_public(current_user),
-        roles=current_user.get_roles(),
+        roles=current_user.roles,
         activeRole=current_user.active_role
     )
 
@@ -172,10 +179,10 @@ def become_vendor(
     current_user.farm_location = body.farm_location
     current_user.farm_type = body.farm_type
     
-    roles = current_user.get_roles()
+    roles = list(current_user.get_roles())
     if "vendor" not in roles:
         roles.append("vendor")
-        current_user.set_roles(roles)
+        current_user.roles = roles
     
     current_user.active_role = "vendor"
     current_user.vendor_onboarding_completed = True
@@ -190,7 +197,7 @@ def become_vendor(
     return TokenResponse(
         access_token=token,
         user=get_user_public(current_user),
-        roles=current_user.get_roles(),
+        roles=current_user.roles,
         activeRole=current_user.active_role
     )
 

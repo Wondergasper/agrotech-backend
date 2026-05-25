@@ -5,25 +5,31 @@
 
 -- 1. USER TABLE
 CREATE TABLE IF NOT EXISTS "user" (
-    id                  SERIAL PRIMARY KEY,
-    name                TEXT NOT NULL,
-    email               TEXT NOT NULL UNIQUE,
-    hashed_password     TEXT NOT NULL,
-    phone               TEXT,
-    role                TEXT,                        -- 'vendor' | 'consumer'
-    avatar_url          TEXT,
+    id                              SERIAL PRIMARY KEY,
+    name                            TEXT NOT NULL,
+    email                           TEXT NOT NULL UNIQUE,
+    hashed_password                 TEXT NOT NULL,
+    phone                           TEXT,
+    role                            TEXT,                        -- Deprecated: 'vendor' | 'consumer'
+    roles                           TEXT[] DEFAULT ARRAY['consumer'],
+    active_role                     TEXT DEFAULT 'consumer',
+    avatar_url                      TEXT,
+
+    -- Onboarding status
+    consumer_onboarding_completed   BOOLEAN DEFAULT false,
+    vendor_onboarding_completed     BOOLEAN DEFAULT false,
 
     -- Vendor-specific
-    farm_name           TEXT,
-    farm_location       TEXT,
-    farm_type           TEXT,
+    farm_name                       TEXT,
+    farm_location                   TEXT,
+    farm_type                       TEXT,
 
     -- Consumer-specific
-    budget              INTEGER,
-    health_tags_json    TEXT NOT NULL DEFAULT '[]',
-    preferences_json    TEXT NOT NULL DEFAULT '[]',
+    budget                          INTEGER,
+    health_tags_json                TEXT NOT NULL DEFAULT '[]',
+    preferences_json                TEXT NOT NULL DEFAULT '[]',
 
-    created_at          TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at                      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ix_user_email ON "user" (email);

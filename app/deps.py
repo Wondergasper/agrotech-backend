@@ -100,11 +100,27 @@ def get_current_user_optional(
 
 def require_vendor(current_user: User = Depends(get_current_user)) -> User:
     if current_user.active_role != "vendor":
-        raise HTTPException(status_code=403, detail="Active role must be vendor")
+        raise HTTPException(
+            status_code=403, 
+            detail={
+                "message": "User does not have role: vendor",
+                "availableRoles": current_user.get_roles(),
+                "requiresOnboarding": not current_user.vendor_onboarding_completed,
+                "role": "vendor"
+            }
+        )
     return current_user
 
 
 def require_consumer(current_user: User = Depends(get_current_user)) -> User:
     if current_user.active_role != "consumer":
-        raise HTTPException(status_code=403, detail="Active role must be consumer")
+        raise HTTPException(
+            status_code=403, 
+            detail={
+                "message": "User does not have role: consumer",
+                "availableRoles": current_user.get_roles(),
+                "requiresOnboarding": not current_user.consumer_onboarding_completed,
+                "role": "consumer"
+            }
+        )
     return current_user

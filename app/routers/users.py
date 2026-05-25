@@ -93,11 +93,11 @@ def update_role(
     current_user.role = target_role
     current_user.active_role = target_role
     
-    # Ensure it's in the roles list
-    roles = current_user.get_roles()
+    # Ensure it's in the roles list (with copy for change tracking)
+    roles = list(current_user.get_roles())
     if target_role not in roles:
         roles.append(target_role)
-        current_user.set_roles(roles)
+        current_user.roles = roles
 
     session.add(current_user)
     session.commit()
