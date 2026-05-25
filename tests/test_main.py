@@ -48,7 +48,7 @@ def test_healthcheck():
 
 def test_signup_new_user():
     """POST /api/auth/signup creates a user and returns a token."""
-    res = client.post("/api/auth/signup", json={
+    res = client.post("/auth/signup", json={
         "name": "Alice Farmer",
         "email": "alice@farm.com",
         "password": "securepass123",
@@ -67,8 +67,8 @@ def test_signup_duplicate_email():
         "password": "pass1234",
         "role": "consumer"
     }
-    client.post("/api/auth/signup", json=payload)          # first — should succeed
-    res = client.post("/api/auth/signup", json=payload)    # second — must fail
+    client.post("/auth/signup", json=payload)          # first — should succeed
+    res = client.post("/auth/signup", json=payload)    # second — must fail
     assert res.status_code == 400
     assert "Email already registered" in res.json()["detail"]
 
@@ -76,13 +76,13 @@ def test_signup_duplicate_email():
 def test_login_valid_credentials():
     """POST /api/auth/login with valid credentials returns a token."""
     # First create the user
-    client.post("/api/auth/signup", json={
+    client.post("/auth/signup", json={
         "name": "Carol Consumer",
         "email": "carol@consumer.com",
         "password": "mypassword",
         "role": "consumer"
     })
-    res = client.post("/api/auth/login", json={
+    res = client.post("/auth/login", json={
         "email": "carol@consumer.com",
         "password": "mypassword"
     })
@@ -92,13 +92,13 @@ def test_login_valid_credentials():
 
 def test_login_wrong_password():
     """POST /api/auth/login with wrong password returns 401."""
-    client.post("/api/auth/signup", json={
+    client.post("/auth/signup", json={
         "name": "Dave Dev",
         "email": "dave@dev.com",
         "password": "realpass",
         "role": "consumer"
     })
-    res = client.post("/api/auth/login", json={
+    res = client.post("/auth/login", json={
         "email": "dave@dev.com",
         "password": "wrongpass"
     })
@@ -107,7 +107,7 @@ def test_login_wrong_password():
 
 def test_login_nonexistent_user():
     """POST /api/auth/login for unknown email returns 401."""
-    res = client.post("/api/auth/login", json={
+    res = client.post("/auth/login", json={
         "email": "ghost@nobody.com",
         "password": "whatever"
     })
@@ -115,40 +115,68 @@ def test_login_nonexistent_user():
 
 
 def test_forgot_password_unknown_email():
-    """Forgot-password for unknown email still returns 200 (no email enumeration)."""
-    res = client.post("/api/auth/forgot-password", json={"email": "unknown@x.com"})
+    """Forgot-password returns the deprecation message."""
+    res = client.post("/auth/forgot-password", json={"email": "unknown@x.com"})
     assert res.status_code == 200
-    assert "reset code" in res.json()["message"].lower()
+    assert "use the reset-password endpoint" in res.json()["message"]
 
 
-def test_forgot_and_reset_password():
-    """Full forgot-password → reset-password flow using the dev_otp."""
+def test_reset_password_direct():
+    """Test the insecure dev-only reset-password flow."""
     email = "reset@test.com"
-    client.post("/api/auth/signup", json={
+    client.post("/auth/signup", json={
         "name": "Reset User",
         "email": email,
         "password": "oldpassword",
         "role": "consumer"
     })
 
-    # Request OTP
-    forgot_res = client.post("/api/auth/forgot-password", json={"email": email})
-    assert forgot_res.status_code == 200
-    otp = forgot_res.json().get("dev_otp")
-    assert otp is not None
-
-    # Reset with OTP
-    reset_res = client.post("/api/auth/reset-password", json={
+    # Reset directly (no OTP needed in this dev version)
+    reset_res = client.post("/auth/reset-password", json={
         "email": email,
-        "token": otp,
         "new_password": "newpassword123"
     })
     assert reset_res.status_code == 200
 
     # Login with new password
-    login_res = client.post("/api/auth/login", json={
+    login_res = client.post("/auth/login", json={
         "email": email,
         "password": "newpassword123"
     })
     assert login_res.status_code == 200
     assert "access_token" in login_res.json()
+
+
+def test_switch_role():
+    """PATCH /auth/switch-role changes the active role."""
+    # Create a user with both roles (manually or via onboarding)
+    email = "switcher@test.com"
+    signup_res = client.post("/auth/signup", json={
+        "name": "Switcher",
+        "email": email,
+        "password": "password",
+        "role": "consumer"
+    })
+    token = signup_res.json()["access_token"]
+    
+    # First, become a vendor to have both roles
+    client.post("/auth/become-vendor", 
+        json={"farm_name": "Test Farm", "farm_location": "Local", "farm_type": "Crop"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    # Switch back to consumer
+    res = client.patch("/auth/switch-role", 
+        json={"role": "consumer"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert res.status_code == 200
+    assert res.json()["activeRole"] == "consumer"
+
+    # Switch to vendor
+    res = client.patch("/auth/switch-role", 
+        json={"role": "vendor"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert res.status_code == 200
+    assert res.json()["activeRole"] == "vendor"

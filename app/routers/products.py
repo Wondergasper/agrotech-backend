@@ -1,6 +1,7 @@
 import json
 import uuid
 import base64
+import random
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlmodel import Session, select
@@ -12,7 +13,7 @@ from app.schemas import (
     ProductPublic,
     ProductUpdate,
 )
-from app.deps import get_current_user, require_vendor
+from app.deps import get_current_user, get_current_user_optional, require_vendor
 from app.storage import (
     ensure_storage_bucket,
     get_public_url,
@@ -127,8 +128,9 @@ def list_products(
     q: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     sort: Optional[str] = Query(None, description="freshness | price | name | rating"),
+    shuffle: bool = Query(False, description="Randomize the order of products"),
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     stmt = select(Product).where(Product.is_active == True)
     if category:
@@ -142,13 +144,16 @@ def list_products(
             if ql in p.name.lower() or (p.description and ql in p.description.lower())
         ]
 
-    if sort == "price":
+    if shuffle:
+        random.shuffle(products)
+    elif sort == "price":
         products.sort(key=lambda p: p.price)
     elif sort == "name":
         products.sort(key=lambda p: p.name)
     elif sort == "rating":
         products.sort(key=lambda p: p.rating, reverse=True)
     else:
+        # Default sort by freshness if not shuffling
         products.sort(key=lambda p: p.freshness, reverse=True)
 
     return [_to_public(p) for p in products]
@@ -170,7 +175,7 @@ def my_products(
 def get_product(
     product_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     product = session.get(Product, product_id)
     if not product or not product.is_active:

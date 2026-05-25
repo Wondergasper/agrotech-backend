@@ -30,7 +30,7 @@ app.add_middleware(
 )
 
 # Register all routers
-app.include_router(auth.router)
+app.include_router(auth.router, prefix="/auth")
 app.include_router(users.router)
 app.include_router(products.router)
 app.include_router(orders.router)

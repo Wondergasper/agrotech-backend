@@ -16,7 +16,7 @@ from app.deps import (
     get_user_public,
 )
 
-router = APIRouter(prefix="/api/auth", tags=["Auth"])
+router = APIRouter(tags=["Auth"])
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=201)
