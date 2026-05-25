@@ -92,10 +92,10 @@ class UpdateFarmRequest(BaseModel):
     farm_type: Optional[str] = None
 
 class UpdateRoleRequest(BaseModel):
-    role: str   # "vendor" | "consumer"
+    role: str   # "vendor" | "consumer" | "farmer"
 
 class SwitchRoleRequest(BaseModel):
-    role: str   # "vendor" | "consumer"
+    role: str   # "vendor" | "consumer" | "farmer"
 
 
 # ─── Products ────────────────────────────────────────────────────────────────

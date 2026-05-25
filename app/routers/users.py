@@ -79,13 +79,26 @@ def update_role(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    """Set the user's role (vendor or consumer). Can only be set once per session."""
-    if body.role not in VALID_ROLES:
+    """Set the user's role (vendor or consumer). Updates active_role and roles list."""
+    target_role = body.role.lower()
+    if target_role == "farmer":
+        target_role = "vendor"
+
+    if target_role not in VALID_ROLES:
         raise HTTPException(
             status_code=400,
             detail=f"Role must be one of: {', '.join(VALID_ROLES)}",
         )
-    current_user.role = body.role
+    
+    current_user.role = target_role
+    current_user.active_role = target_role
+    
+    # Ensure it's in the roles list
+    roles = current_user.get_roles()
+    if target_role not in roles:
+        roles.append(target_role)
+        current_user.set_roles(roles)
+
     session.add(current_user)
     session.commit()
     session.refresh(current_user)

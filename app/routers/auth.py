@@ -1,4 +1,5 @@
 import secrets
+import json
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
@@ -97,12 +98,19 @@ def switch_role(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
+    target_role = body.role.lower()
+    if target_role == "farmer":
+        target_role = "vendor"
+
     roles = current_user.get_roles()
-    if body.role not in roles:
-        raise HTTPException(status_code=400, detail=f"User does not have role: {body.role}")
+    if target_role not in roles:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"User does not have role: {body.role}. Available roles: {', '.join(roles)}"
+        )
     
-    current_user.active_role = body.role
-    current_user.role = body.role  # Sync legacy field
+    current_user.active_role = target_role
+    current_user.role = target_role  # Sync legacy field
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
