@@ -52,9 +52,51 @@ class User(SQLModel, table=True):
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
     def get_roles(self) -> List[str]:
-        if self.roles is None:
-            return ["consumer"]
-        return self.roles
+        """
+        Safely return the user's roles list.
+
+        Handles every edge case that can come back from the Postgres ARRAY column
+        via SQLAlchemy / PgBouncer:
+          - None            → fall back to active_role or "consumer"
+          - []              → same fallback
+          - "consumer"      → wrap in a list
+          - '["consumer"]'  → parse JSON string
+          - ["consumer"]    → return as-is (normal case)
+        """
+        import json as _json
+
+        raw = self.roles
+
+        # None or empty
+        if not raw:
+            fallback = getattr(self, "active_role", None) or getattr(self, "role", None) or "consumer"
+            return [fallback]
+
+        # Already a proper non-empty list
+        if isinstance(raw, list):
+            # Filter out any None/empty entries
+            cleaned = [r for r in raw if r]
+            if cleaned:
+                return cleaned
+            fallback = getattr(self, "active_role", None) or "consumer"
+            return [fallback]
+
+        # Stringified JSON e.g. '["vendor","consumer"]'
+        if isinstance(raw, str):
+            stripped = raw.strip()
+            if stripped.startswith("["):
+                try:
+                    parsed = _json.loads(stripped)
+                    if isinstance(parsed, list) and parsed:
+                        return [r for r in parsed if r]
+                except Exception:
+                    pass
+            # Plain string e.g. "consumer"
+            if stripped:
+                return [stripped]
+
+        fallback = getattr(self, "active_role", None) or "consumer"
+        return [fallback]
 
     def set_roles(self, roles: List[str]) -> None:
         self.roles = roles

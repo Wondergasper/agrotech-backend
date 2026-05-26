@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
+from jose import JWTError, ExpiredSignatureError, jwt
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -39,19 +39,27 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def get_user_public(user: User) -> UserPublic:
     """Helper to convert User model to UserPublic schema consistently."""
     data = user.model_dump()
-    
-    # Safe fallbacks for new fields in case DB columns are missing or NULL
-    data["roles"] = user.get_roles() if hasattr(user, "get_roles") else [getattr(user, "role", "consumer") or "consumer"]
-    data["activeRole"] = getattr(user, "active_role", None) or getattr(user, "role", "consumer") or "consumer"
-    
+
+    # Roles — always a non-empty list
+    roles = user.get_roles() if hasattr(user, "get_roles") else []
+    if not roles:
+        roles = [getattr(user, "active_role", None) or getattr(user, "role", None) or "consumer"]
+    data["roles"] = roles
+
+    # Active role — must be a valid member of roles
+    active_role = getattr(user, "active_role", None) or getattr(user, "role", None) or "consumer"
+    if active_role not in roles:
+        active_role = roles[0]
+    data["activeRole"] = active_role
+
     # Ensure boolean flags are actually bool, not None
     data["consumerOnboardingCompleted"] = bool(getattr(user, "consumer_onboarding_completed", False))
     data["vendorOnboardingCompleted"] = bool(getattr(user, "vendor_onboarding_completed", False))
-    
+
     # Handle JSON lists
     data["health_tags"] = user.get_health_tags() if hasattr(user, "get_health_tags") else []
     data["preferences"] = user.get_preferences() if hasattr(user, "get_preferences") else []
-    
+
     return UserPublic(**data)
 
 
@@ -69,6 +77,13 @@ def get_current_user(
         user_id: Optional[str] = payload.get("sub")
         if user_id is None:
             raise credentials_exception
+    except ExpiredSignatureError:
+        # Give the frontend a clear signal to trigger a re-login
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired, please log in again",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except JWTError:
         raise credentials_exception
 
@@ -78,7 +93,12 @@ def get_current_user(
         raise credentials_exception
 
     if user is None:
-        raise credentials_exception
+        # User deleted from DB but token still valid — treat as unauthorized
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 
@@ -94,7 +114,7 @@ def get_current_user_optional(
         if user_id is None:
             return None
         return session.get(User, int(user_id))
-    except (JWTError, ValueError, TypeError):
+    except (ExpiredSignatureError, JWTError, ValueError, TypeError):
         return None
 
 

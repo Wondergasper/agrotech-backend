@@ -13,7 +13,7 @@ from app.schemas import (
 )
 from app.deps import (
     hash_password, verify_password, create_access_token, get_current_user,
-    get_user_public,
+    get_user_public, ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 
 router = APIRouter(tags=["Auth"])
@@ -60,36 +60,46 @@ def login(body: LoginRequest, session: Session = Depends(get_session)):
     
     # --- Robust Migration for Old Users ---
     # Handle cases where roles/active_role might be missing
-    roles = getattr(user, "roles", None)
-    active_role = getattr(user, "active_role", None)
     legacy_role = getattr(user, "role", None)
 
-    if not roles:
-        roles = [legacy_role or "consumer"]
-        user.roles = roles
-    
-    if not active_role:
-        active_role = legacy_role or roles[0] or "consumer"
-        user.active_role = active_role
+    # IMPORTANT: always use list() to create a NEW object so SQLAlchemy
+    # detects the mutation and flushes it to Postgres.
+    roles = list(user.get_roles())   # get_roles() is now hardened — always returns ≥1 item
+    active_role = getattr(user, "active_role", None)
 
-    # Ensure active_role is always valid
+    changed = False
+
+    if not active_role:
+        active_role = legacy_role or roles[0]
+        user.active_role = active_role
+        changed = True
+
+    # Ensure active_role is always a member of roles
     if user.active_role not in roles:
         user.active_role = roles[0]
+        changed = True
 
-    try:
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-    except Exception:
-        session.rollback()
-        # Even if commit fails (e.g. read-only DB), ensure the response has correct values
-        pass
+    # Back-fill roles list if it was empty / None in the DB
+    current_db_roles = list(user.roles) if user.roles else []
+    if not current_db_roles:
+        user.roles = list(roles)   # force new list object → SQLAlchemy dirty flag
+        changed = True
+
+    if changed:
+        try:
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        except Exception:
+            session.rollback()
+            # Continue even if the write fails — the response values are already correct
+            pass
 
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
         user=get_user_public(user),
-        roles=user.roles,
+        roles=user.get_roles(),
         activeRole=user.active_role
     )
 
@@ -104,18 +114,33 @@ def switch_role(
     if target_role == "farmer":
         target_role = "vendor"
 
-    roles = current_user.get_roles()
+    roles = list(current_user.get_roles())  # NEW list object for dirty tracking
+
     if target_role not in roles:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": f"User does not have role: {body.role}",
-                "availableRoles": roles,
-                "requiresOnboarding": True,
-                "role": target_role
-            }
+        # Auto-grant if the user has already completed onboarding for that role
+        # This fixes the bug where a vendor who finished consumer onboarding is blocked.
+        consumer_done = bool(getattr(current_user, "consumer_onboarding_completed", False))
+        vendor_done = bool(getattr(current_user, "vendor_onboarding_completed", False))
+
+        can_auto_grant = (
+            (target_role == "consumer" and consumer_done)
+            or (target_role == "vendor" and vendor_done)
         )
-    
+
+        if can_auto_grant:
+            roles.append(target_role)
+            current_user.roles = list(roles)  # force new list → SQLAlchemy detects change
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": f"User does not have role: {target_role}",
+                    "availableRoles": roles,
+                    "requiresOnboarding": True,
+                    "role": target_role,
+                }
+            )
+
     current_user.active_role = target_role
     current_user.role = target_role  # Sync legacy field
     session.add(current_user)
@@ -126,9 +151,40 @@ def switch_role(
     return TokenResponse(
         access_token=token,
         user=get_user_public(current_user),
-        roles=current_user.roles,
+        roles=current_user.get_roles(),
         activeRole=current_user.active_role
     )
+
+@router.get("/me", response_model=TokenResponse)
+def get_me(current_user: User = Depends(get_current_user)):
+    """
+    Returns the currently authenticated user's profile and a fresh token.
+    The frontend uses this to sync role state after app launch or role switch.
+    Aliased here under /auth so the frontend only needs one base URL.
+    """
+    token = create_access_token({"sub": str(current_user.id)})
+    return TokenResponse(
+        access_token=token,
+        user=get_user_public(current_user),
+        roles=current_user.get_roles(),
+        activeRole=current_user.active_role,
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh_token(current_user: User = Depends(get_current_user)):
+    """
+    Issue a fresh token for the current user without requiring re-login.
+    Useful when the frontend detects a near-expiry token.
+    """
+    token = create_access_token({"sub": str(current_user.id)})
+    return TokenResponse(
+        access_token=token,
+        user=get_user_public(current_user),
+        roles=current_user.get_roles(),
+        activeRole=current_user.active_role,
+    )
+
 
 
 @router.post("/become-consumer", response_model=TokenResponse)
@@ -162,7 +218,7 @@ def become_consumer(
     return TokenResponse(
         access_token=token,
         user=get_user_public(current_user),
-        roles=current_user.roles,
+        roles=current_user.get_roles(),
         activeRole=current_user.active_role
     )
 
@@ -197,7 +253,7 @@ def become_vendor(
     return TokenResponse(
         access_token=token,
         user=get_user_public(current_user),
-        roles=current_user.roles,
+        roles=current_user.get_roles(),
         activeRole=current_user.active_role
     )
 
