@@ -28,7 +28,14 @@ def update_profile(
     if body.name is not None:
         current_user.name = body.name
     if body.phone is not None:
-        current_user.phone = body.phone
+        phone_val = body.phone.strip()
+        if phone_val:
+            import re
+            if not re.match(r'^[+0-9\s()-]{5,20}$', phone_val):
+                raise HTTPException(status_code=400, detail="Invalid phone number format")
+            current_user.phone = phone_val
+        else:
+            current_user.phone = None
     if body.avatar_url is not None:
         current_user.avatar_url = body.avatar_url
     session.add(current_user)
