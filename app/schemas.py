@@ -168,6 +168,7 @@ class OrderPublic(BaseModel):
     vendor_name: Optional[str] = None
     farm_name: Optional[str] = None
     image_url: Optional[str] = None
+    vendor_phone: Optional[str] = None
     quantity: int
     total_price: float
     status: str

@@ -22,6 +22,7 @@ def _order_to_public(o: Order) -> OrderPublic:
         vendor_name=getattr(product, "vendor_name", None),
         farm_name=getattr(product, "farm_name", None),
         image_url=getattr(product, "image_url", None),
+        vendor_phone=o.__dict__.get("_vendor_phone"),
         quantity=o.quantity,
         total_price=o.total_price,
         status=o.status,
@@ -71,6 +72,7 @@ def create_order(
         session.refresh(order)
         order._product_snapshot = product_snapshots.get(order.product_id)
 
+    _attach_vendor_phones(created_orders, session)
     return [_order_to_public(o) for o in created_orders]
 
 
@@ -86,6 +88,7 @@ def my_orders(
         .order_by(Order.created_at.desc())
     ).all()
     _attach_product_snapshots(orders, session)
+    _attach_vendor_phones(orders, session)
     return [_order_to_public(o) for o in orders]
 
 
@@ -101,6 +104,7 @@ def vendor_orders(
         .order_by(Order.created_at.desc())
     ).all()
     _attach_product_snapshots(orders, session)
+    _attach_vendor_phones(orders, session)
     return [_order_to_public(o) for o in orders]
 
 
@@ -139,6 +143,7 @@ def update_order_status(
     session.commit()
     session.refresh(order)
     _attach_product_snapshots([order], session)
+    _attach_vendor_phones([order], session)
     return _order_to_public(order)
 
 
@@ -152,3 +157,15 @@ def _attach_product_snapshots(orders: List[Order], session: Session) -> None:
 
     for order in orders:
         order._product_snapshot = product_map.get(order.product_id)
+
+
+def _attach_vendor_phones(orders: List[Order], session: Session) -> None:
+    if not orders:
+        return
+
+    vendor_ids = sorted({order.vendor_id for order in orders})
+    vendors = session.exec(select(User).where(User.id.in_(vendor_ids))).all()
+    vendor_map = {vendor.id: vendor.phone for vendor in vendors}
+
+    for order in orders:
+        order._vendor_phone = vendor_map.get(order.vendor_id)
